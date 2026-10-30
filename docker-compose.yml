@@ -1,0 +1,9 @@
+services:
+  integrator_src:
+    build: .                           
+    container_name: integrator_calendar_src 
+    ports:
+      - "8001:8001"                     
+    env_file:
+      - .env
+    restart: always
