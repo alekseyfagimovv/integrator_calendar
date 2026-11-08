@@ -6,7 +6,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # 2. Рабочая папка. Создаем внутри контейнера папку /app и переходим в нее
 WORKDIR /app
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app:/app/src
 
 # 3. Копируем файлы конфигурации проекта (для кэширования слоев Docker)
 COPY pyproject.toml uv.lock ./

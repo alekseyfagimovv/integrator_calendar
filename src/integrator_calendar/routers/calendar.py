@@ -11,10 +11,6 @@ from pathlib import Path
 
 router = APIRouter()
 
-@router.get("/ping")
-async def ping():
-    return {"message": "pong"}
-
 @router.get("/auth/login")
 async def login(account_key: str = "account_1"):
     auth_url = (
