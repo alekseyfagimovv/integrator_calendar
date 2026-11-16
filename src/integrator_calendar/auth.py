@@ -1,10 +1,12 @@
 import json
-from pathlib import Path
 import httpx
+from pathlib import Path
+from datetime import datetime, timedelta
 from integrator_calendar.config import settings
+import asyncio
 
-# Теперь файл называется tokens.json
 TOKEN_FILE = Path("tokens.json")
+_token_cache = {}
 
 async def get_tokens_from_code(code: str, account_key: str) -> dict:
     url = "https://oauth2.googleapis.com/token"
@@ -15,26 +17,43 @@ async def get_tokens_from_code(code: str, account_key: str) -> dict:
         "redirect_uri": settings.redirect_uri,
         "grant_type": "authorization_code",
     }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, data=payload)
-        response.raise_for_status()
-        tokens = response.json()
-        
-        # Читаем существующие токены, если файл уже есть
-        all_tokens = {}
-        if TOKEN_FILE.exists():
-            with open(TOKEN_FILE, "r") as f:
-                all_tokens = json.load(f)
-                
-        # Сохраняем токен под ключом (например, 'account_1' или 'account_2')
-        all_tokens[account_key] = tokens["refresh_token"]
-        
-        with open(TOKEN_FILE, "w") as f:
-            json.dump(all_tokens, f)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, data=payload)
+                response.raise_for_status()
+                tokens = response.json()
+                break
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            print(f"⚠️ [AUTH] Сетевая ошибка (попытка {attempt+1}/{max_retries}): {repr(e)}")
+            if attempt == max_retries - 1:
+                raise Exception(f"Не удалось авторизоваться после {max_retries} попыток: {str(e)}")
+            await asyncio.sleep(2)
+        except Exception as e:
+            raise Exception(f"Ошибка авторизации Google: {response.text}")
+
+    all_tokens = {}
+    if TOKEN_FILE.exists():
+        with open(TOKEN_FILE, "r") as f:
+            all_tokens = json.load(f)
             
-        return tokens
+    all_tokens[account_key] = tokens["refresh_token"]
+    
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(all_tokens, f)
+        
+    return tokens
 
 async def get_access_token(account_key: str) -> str:
+    now = datetime.now()
+    
+    if account_key in _token_cache:
+        cached_data = _token_cache[account_key]
+        if cached_data["expires_at"] > now + timedelta(minutes=2):
+            return cached_data["token"]
+
     if not TOKEN_FILE.exists():
         raise FileNotFoundError("Файл tokens.json не найден. Сначала авторизуйтесь.")
         
@@ -53,7 +72,26 @@ async def get_access_token(account_key: str) -> str:
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
     }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, data=payload)
-        response.raise_for_status()
-        return response.json()["access_token"]
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, data=payload)
+                if response.status_code != 200:
+                    raise Exception(f"Google API вернул {response.status_code}: {response.text}")
+                
+                data = response.json()
+                new_token = data["access_token"]
+                expires_in = data.get("expires_in", 3600)
+                
+                _token_cache[account_key] = {
+                    "token": new_token,
+                    "expires_at": now + timedelta(seconds=expires_in)
+                }
+                return new_token
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            print(f"⚠️ [AUTH] Ошибка сети при получении токена (попытка {attempt+1}/{max_retries}): {repr(e)}")
+            if attempt == max_retries - 1:
+                raise Exception(f"Не удалось обновить токен: {str(e)}")
+            await asyncio.sleep(2)

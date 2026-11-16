@@ -17,6 +17,7 @@
             --success-hover: #059669;
             --danger: #ef4444;
             --danger-hover: #dc2626;
+            --warning: #f59e0b;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -76,7 +77,6 @@
             justify-content: center;
         }
 
-        /* Стили для заблокированных кнопок */
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
@@ -85,7 +85,7 @@
 
         .btn-primary { background-color: var(--primary); width: 100%; }
         .btn-primary:hover:not(:disabled) { background-color: var(--primary-hover); }
-        
+
         .btn-success { background-color: var(--success); width: 100%; }
         .btn-success:hover:not(:disabled) { background-color: var(--success-hover); }
 
@@ -111,12 +111,24 @@
         .btn-add { background-color: #eff6ff; color: var(--primary); width: 100%; margin-top: 8px; border: 1px dashed #bfdbfe; }
         .btn-add:hover { background-color: #dbeafe; }
 
-        #log { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; height: 150px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85rem; white-space: pre-wrap; }
+        #log { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; height: 180px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85rem; white-space: pre-wrap; }
     </style>
 </head>
-<body onload="loadTemplates()">
+<body onload="initPage()">
     <div class="container">
         <h1>📅 Управление календарем</h1>
+
+        <div class="card">
+            <h2>🔐 Авторизация Google</h2>
+            <div class="form-group">
+                <div>
+                    <button onclick="authorize('account_1', this)" class="btn-primary">Войти: Личный (Account 1)</button>
+                </div>
+                <div>
+                    <button onclick="authorize('account_2', this)" class="btn-primary">Войти: Общий (Account 2)</button>
+                </div>
+            </div>
+        </div>
 
         <div class="card">
             <h2>1. Сгенерировать расписание</h2>
@@ -124,7 +136,6 @@
                 <div><label>Начало</label><input type="date" id="start_date"></div>
                 <div><label>Конец</label><input type="date" id="end_date"></div>
                 <div style="display: flex; align-items: flex-end;">
-                    <!-- Передаем this (саму кнопку) в функцию -->
                     <button onclick="generateSchedule(this)" class="btn-success">Сгенерировать</button>
                 </div>
             </div>
@@ -165,22 +176,20 @@
 
     <script>
         let currentTemplates = {};
+        let generationPollInterval = null;
 
-        // ГЛОБАЛЬНАЯ БЛОКИРОВКА ВСЕХ КНОПОК
+        // ============ БЛОКИРОВКА КНОПОК ============
         function toggleAllButtons(isLoading, activeBtn = null) {
             const allButtons = document.querySelectorAll('button');
-            
             allButtons.forEach(btn => {
                 if (isLoading) {
                     btn.disabled = true;
-                    // Меняем текст только у той кнопки, на которую нажали
                     if (btn === activeBtn) {
                         btn.dataset.originalText = btn.innerText;
                         btn.innerText = '⏳ Выполняется...';
                     }
                 } else {
                     btn.disabled = false;
-                    // Возвращаем текст обратно
                     if (btn.dataset.originalText) {
                         btn.innerText = btn.dataset.originalText;
                         delete btn.dataset.originalText;
@@ -189,6 +198,67 @@
             });
         }
 
+        // ============ ИНИЦИАЛИЗАЦИЯ СТРАНИЦЫ ============
+        async function initPage() {
+            await loadTemplates();
+            // Проверяем, не идет ли уже генерация (например, после перезагрузки страницы)
+            const isGenerating = await checkGenerationStatus();
+            if (isGenerating) {
+                startGenerationPolling();
+            }
+        }
+
+        // ============ СТАТУС ГЕНЕРАЦИИ ============
+        async function checkGenerationStatus() {
+            try {
+                const res = await fetch('/api/generate/status');
+                if (!res.ok) return false;
+                const data = await res.json();
+                return data.is_generating === true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function startGenerationPolling() {
+            // Останавливаем старый поллинг, если был
+            if (generationPollInterval) {
+                clearInterval(generationPollInterval);
+            }
+
+            // Блокируем все кнопки
+            toggleAllButtons(true);
+            log('⏳ Генерация выполняется в фоне. Кнопки разблокируются автоматически после завершения.\n\nДля деталей откройте терминал:\ndocker logs -f integrator_calendar_src');
+
+            // Проверяем статус каждые 3 секунды
+            generationPollInterval = setInterval(async () => {
+                const isGenerating = await checkGenerationStatus();
+                if (!isGenerating) {
+                    clearInterval(generationPollInterval);
+                    generationPollInterval = null;
+                    toggleAllButtons(false);
+                    log('✅ Генерация завершена! Все кнопки разблокированы.\n\nПодробный лог: docker logs -f integrator_calendar_src');
+                }
+            }, 3000);
+        }
+
+        // ============ АВТОРИЗАЦИЯ ============
+        async function authorize(accountKey, btn) {
+            toggleAllButtons(true, btn);
+            log(`⏳ Запрос ссылки для ${accountKey}...`);
+            try {
+                const res = await fetch(`/api/auth/login?account_key=${accountKey}`);
+                if (!res.ok) throw new Error("Ошибка при получении ссылки");
+                const data = await res.json();
+                log(`✅ Перенаправление на страницу Google...`);
+                window.location.href = data.auth_url;
+            } catch (e) {
+                log('❌ ОШИБКА: ' + e.message);
+                toggleAllButtons(false);
+            }
+        }
+
+        // ============ ШАБЛОНЫ ============
         async function loadTemplates() {
             try {
                 const response = await fetch('/api/templates');
@@ -197,7 +267,7 @@
                 renderEditor();
                 log('✅ Шаблоны загружены');
             } catch (e) {
-                document.getElementById('editor-container').innerHTML = 
+                document.getElementById('editor-container').innerHTML =
                     '<div style="color: var(--danger); text-align: center;">Ошибка загрузки данных. Проверьте сервер.</div>';
                 log('❌ ОШИБКА загрузки: ' + e.message);
             }
@@ -205,8 +275,8 @@
 
         function renderEditor() {
             const container = document.getElementById('editor-container');
-            container.innerHTML = ''; 
-            
+            container.innerHTML = '';
+
             const templateNames = {
                 "workday": "🔥 Рабочий день",
                 "weekend": "🌴 Выходной",
@@ -215,14 +285,12 @@
 
             for (const [key, title] of Object.entries(templateNames)) {
                 if (!currentTemplates[key]) currentTemplates[key] = [];
-                
-                // --- НОВАЯ СТРОКА: СОРТИРУЕМ ПО ВРЕМЕНИ НАЧАЛА ---
                 currentTemplates[key].sort((a, b) => a.start.localeCompare(b.start));
 
                 const details = document.createElement('details');
                 details.className = 'template-group';
                 details.id = `group-${key}`;
-                details.open = false; 
+                details.open = false;
 
                 const summary = document.createElement('summary');
                 summary.innerText = title;
@@ -253,7 +321,7 @@
         function createEventRow(eventData = null) {
             const row = document.createElement('div');
             row.className = 'event-row';
-            
+
             const data = eventData || { summary: "", start: "09:00", end: "10:00", account: "account_1" };
 
             row.innerHTML = `
@@ -276,16 +344,14 @@
             listDiv.appendChild(newRow);
         }
 
-        // --- ОПЕРАЦИИ С БЛОКИРОВКОЙ ---
-
         async function saveTemplates(btn) {
-            toggleAllButtons(true, btn); 
+            toggleAllButtons(true, btn);
             const newTemplates = { "workday": [], "weekend": [], "study_day": [] };
-            
+
             document.querySelectorAll('.template-group').forEach(group => {
                 const templateKey = group.id.replace('group-', '');
                 const rows = group.querySelectorAll('.event-row');
-                
+
                 rows.forEach(row => {
                     const summary = row.querySelector('.ev-summary').value.trim();
                     const start = row.querySelector('.ev-start').value;
@@ -298,7 +364,6 @@
                 });
             });
 
-            // --- НОВЫЙ БЛОК: СОРТИРУЕМ ПЕРЕД СОХРАНЕНИЕМ ---
             for (const key in newTemplates) {
                 newTemplates[key].sort((a, b) => a.start.localeCompare(b.start));
             }
@@ -313,24 +378,37 @@
             } catch (e) {
                 log('❌ ОШИБКА: ' + e.message);
             } finally {
-                toggleAllButtons(false); 
+                toggleAllButtons(false);
             }
         }
 
+        // ============ ГЕНЕРАЦИЯ ============
         async function generateSchedule(btn) {
             const start = document.getElementById('start_date').value;
             const end = document.getElementById('end_date').value;
             if (!start || !end) return alert('Выберите даты!');
-            
+
             toggleAllButtons(true, btn);
             log(`⏳ Запуск генерации с ${start} по ${end}...`);
             try {
                 const res = await fetch(`/api/generate?start_date=${start}&end_date=${end}`, { method: 'POST' });
                 const data = await res.json();
-                log('✅ Генерация завершена.\n' + JSON.stringify(data.details, null, 2));
-            } catch (e) { 
-                log('❌ ОШИБКА: ' + e.message); 
-            } finally {
+
+                if (res.status === 409) {
+                    log('⚠️ ' + data.detail + '\n\nЗапускаем отслеживание текущей генерации...');
+                    startGenerationPolling();
+                    return;
+                }
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Неизвестная ошибка сервера');
+                }
+
+                log(`✅ ${data.message}`);
+                // Запускаем поллинг — кнопки останутся заблокированными до конца генерации
+                startGenerationPolling();
+            } catch (e) {
+                log('❌ ОШИБКА: ' + e.message);
                 toggleAllButtons(false);
             }
         }
@@ -339,15 +417,15 @@
             const date = document.getElementById('manual_date').value;
             const template = document.getElementById('template_name').value;
             if (!date) return alert('Выберите дату!');
-            
+
             toggleAllButtons(true, btn);
             log(`⏳ Перезапись дня ${date}...`);
             try {
                 const res = await fetch(`/api/day/${date}?template_name=${template}`, { method: 'POST' });
                 const data = await res.json();
                 log('✅ День изменен: ' + JSON.stringify(data, null, 2));
-            } catch (e) { 
-                log('❌ ОШИБКА: ' + e.message); 
+            } catch (e) {
+                log('❌ ОШИБКА: ' + e.message);
             } finally {
                 toggleAllButtons(false);
             }
@@ -364,8 +442,8 @@
                 const res = await fetch(`/api/events/${date}?account=all`, { method: 'DELETE' });
                 const data = await res.json();
                 log('✅ День очищен: ' + JSON.stringify(data, null, 2));
-            } catch (e) { 
-                log('❌ ОШИБКА: ' + e.message); 
+            } catch (e) {
+                log('❌ ОШИБКА: ' + e.message);
             } finally {
                 toggleAllButtons(false);
             }
