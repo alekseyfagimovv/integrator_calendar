@@ -1,3 +1,5 @@
+# src/integrator_calendar/config.py
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,3 +13,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+TEMPLATES_FILE = DATA_DIR / "templates.json"
+TOKENS_FILE = DATA_DIR / "tokens.json"

@@ -1,11 +1,13 @@
 import json
 import httpx
-from pathlib import Path
-from datetime import datetime, timedelta
-from integrator_calendar.config import settings
 import asyncio
 
-TOKEN_FILE = Path("tokens.json")
+from pathlib import Path
+from datetime import datetime, timedelta
+from src.integrator_calendar.config import settings
+from src.integrator_calendar.config import TOKENS_FILE
+
+
 _token_cache = {}
 
 async def get_tokens_from_code(code: str, account_key: str) -> dict:
@@ -35,13 +37,13 @@ async def get_tokens_from_code(code: str, account_key: str) -> dict:
             raise Exception(f"Ошибка авторизации Google: {response.text}")
 
     all_tokens = {}
-    if TOKEN_FILE.exists():
-        with open(TOKEN_FILE, "r") as f:
+    if TOKENS_FILE.exists():
+        with open(TOKENS_FILE, "r") as f:
             all_tokens = json.load(f)
             
     all_tokens[account_key] = tokens["refresh_token"]
     
-    with open(TOKEN_FILE, "w") as f:
+    with open(TOKENS_FILE, "w") as f:
         json.dump(all_tokens, f)
         
     return tokens
@@ -54,10 +56,10 @@ async def get_access_token(account_key: str) -> str:
         if cached_data["expires_at"] > now + timedelta(minutes=2):
             return cached_data["token"]
 
-    if not TOKEN_FILE.exists():
+    if not TOKENS_FILE.exists():
         raise FileNotFoundError("Файл tokens.json не найден. Сначала авторизуйтесь.")
         
-    with open(TOKEN_FILE, "r") as f:
+    with open(TOKENS_FILE, "r") as f:
         all_tokens = json.load(f)
         
     if account_key not in all_tokens:

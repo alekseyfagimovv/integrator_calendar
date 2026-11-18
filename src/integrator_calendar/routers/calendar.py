@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from integrator_calendar.config import settings
-from integrator_calendar import auth, calendar_service
-from integrator_calendar.schemas.calendar import EventCreate
+from src.integrator_calendar.config import settings
+from src.integrator_calendar import auth, calendar_service
+from src.integrator_calendar.schemas.calendar import EventCreate
 
 from datetime import datetime, timedelta
 import asyncio
@@ -232,7 +232,7 @@ async def set_manual_day(date_str: str, template_name: str):
 
 @router.get("/templates")
 async def get_templates():
-    template_path = Path("templates.json")
+    template_path = Path("data/templates.json")
     if not template_path.exists():
         raise HTTPException(status_code=404, detail="Файл templates.json не найден")
     with open(template_path, "r", encoding="utf-8") as f:
@@ -241,7 +241,7 @@ async def get_templates():
 
 @router.post("/templates")
 async def save_templates(data: dict):
-    template_path = Path("templates.json")
+    template_path = Path("data/templates.json")
     with open(template_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     return {"status": "success", "message": "Шаблоны успешно обновлены!"}

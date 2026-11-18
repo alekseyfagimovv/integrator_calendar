@@ -1,6 +1,6 @@
 import httpx
 import asyncio
-from integrator_calendar.auth import get_access_token
+from src.integrator_calendar.auth import get_access_token
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
@@ -90,7 +90,7 @@ async def delete_events_for_day(calendar_id: str, date_str: str, account_key: st
 
 async def fill_day_by_template(date_str: str, template_name: str):
     from integrator_calendar.config import settings
-    template_path = Path("templates.json")
+    template_path = Path("data/templates.json")
     if not template_path.exists():
         raise FileNotFoundError("Файл templates.json не найден в корне проекта!")
         
